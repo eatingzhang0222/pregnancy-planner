@@ -19,6 +19,7 @@ const NK = NUTRIENTS.map((n) => n.k);
 
 /* ========== 存储 ========== */
 const KEY = 'pp_v1';
+const APP_VERSION = '2026.11.26-4';
 function defaultState() {
   return {
     settings: {
@@ -760,7 +761,10 @@ function renderSettings() {
       <p class="muted" style="margin-top:0">数据只存在本机浏览器里。换手机或清理 Safari 前记得导出。</p>
       <div class="grid3"><button class="btn sm ghost" data-act="export">导出</button>
         <label class="btn sm ghost" style="text-align:center">导入<input type="file" accept="application/json,.json" hidden id="import-in"></label>
-        <button class="btn sm ghost" data-act="wipe">清空</button></div></div>`;
+        <button class="btn sm ghost" data-act="wipe">清空</button></div></div>
+    <div class="card"><h3>版本 <em>${APP_VERSION}</em></h3>
+      <p class="muted" style="margin-top:0">看不到新功能时点这里，只清网页缓存，不会删你的记录。</p>
+      <button class="btn sm ghost" data-act="force-update">强制更新</button></div>`;
 }
 function bindSettings() {
   const v = $('#view');
@@ -863,6 +867,14 @@ const ACTIONS = {
     catch (e) { out.textContent = `✗ ${e.message}（可能是 Key 错误或接口不允许浏览器跨域）`; }
   },
   export: exportData,
+  'force-update': async () => {
+    toast('正在更新…');
+    try {
+      if ('serviceWorker' in navigator) (await navigator.serviceWorker.getRegistrations()).forEach((r) => r.unregister());
+      if (window.caches) await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
+    } catch (e) { toast(`清缓存失败：${e.message}`); }
+    location.replace(`${location.pathname}?v=${Date.now()}`);
+  },
   wipe: () => { if (confirm('清空所有数据？此操作无法撤销，建议先导出')) { S = defaultState(); save(); render(); toast('已清空'); } },
 };
 document.addEventListener('click', (e) => {

@@ -1,5 +1,5 @@
 // 离线缓存：网络优先（每次向服务器确认新版本），断网时用缓存
-const C = 'pp-v3';
+const C = 'pp-v4';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'chat.js', 'data.js', 'manifest.webmanifest', 'icon.png'];
 self.addEventListener('install', (e) => {
   self.skipWaiting();
@@ -13,5 +13,5 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || !e.request.url.startsWith(self.location.origin)) return;
   e.respondWith(fetch(e.request, { cache: 'no-cache' })
     .then((r) => { const copy = r.clone(); caches.open(C).then((c) => c.put(e.request, copy)); return r; })
-    .catch(() => caches.match(e.request)));
+    .catch(() => caches.match(e.request, { ignoreSearch: true })));
 });
