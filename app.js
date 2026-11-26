@@ -60,7 +60,7 @@ function save() {
   catch (e) { toast('保存失败：浏览器存储不可用'); }
 }
 
-const ui = { tab: 'today', date: today(), meal: 'all', review: null, picked: null, cat: '全部', q: '' };
+const ui = { tab: 'today', date: today(), view: 'day', meal: 'all', review: null, picked: null, cat: '全部', q: '' };
 
 /* ========== 通用 UI ========== */
 let toastTimer;
@@ -160,7 +160,56 @@ function dateNav() {
       <span class="muted">${g ? `${g.w}w+${g.d}` : ''}${ui.date === today() ? ' · 今天' : ' · 点此回到今天'}</span></div>
     <button class="icon-btn" data-act="day" data-n="1" aria-label="后一天">›</button></div>`;
 }
+const VIEWS = [['day', '日'], ['week', '周'], ['month', '月']];
+const viewSeg = () => `<div class="seg" style="justify-content:center">${VIEWS.map(([k, n]) => `<button class="${ui.view === k ? 'on' : ''}" data-act="view" data-v="${k}" style="min-width:64px">${n}</button>`).join('')}</div>`;
+const weekStart = (d) => addDays(d, 1 - (parseYmd(d).getDay() || 7));
+function rangeNav(title, sub) {
+  return `<div class="datenav">
+    <button class="icon-btn" data-act="shift" data-n="-1" aria-label="上一段">‹</button>
+    <div class="d" data-act="shift" data-n="0"><b>${title}</b><span class="muted">${sub}</span></div>
+    <button class="icon-btn" data-act="shift" data-n="1" aria-label="下一段">›</button></div>`;
+}
+function dayBadges(d) {
+  return `${d === today() ? '<span class="badge">今天</span>' : ''}${d === S.settings.due ? '<span class="badge due">预产期</span>' : ''}`;
+}
+function renderWeek() {
+  const ws = weekStart(ui.date), we = addDays(ws, 6);
+  const a = parseYmd(ws), b = parseYmd(we), g = gaInfo(ws), g2 = gaInfo(we);
+  const rows = [0, 1, 2, 3, 4, 5, 6].map((i) => {
+    const d = addDays(ws, i), dt = parseYmd(d), gi = gaInfo(d);
+    const acts = dayActs(d).slice().sort((x, y) => x.start - y.start);
+    return `<div class="week-row ${d === today() ? 'is-today' : ''}" data-act="goto-day" data-date="${d}">
+      <div class="wd"><b>${dt.getDate()}</b><span>周${WEEK[dt.getDay()]}</span>${gi ? `<small>${gi.w}+${gi.d}</small>` : ''}</div>
+      <div class="grow">${dayBadges(d)}${acts.map((x) => `<div class="pill ${x.done ? 'done' : ''}" data-act="edit-act" data-id="${x.id}" style="--c:${typeOf(x.type).color}">
+        <span>${hm(x.start)}</span>${esc(x.title)}</div>`).join('') || '<span class="muted">—</span>'}</div></div>`;
+  }).join('');
+  $('#view').innerHTML = viewSeg() + rangeNav(`${a.getMonth() + 1}/${a.getDate()} – ${b.getMonth() + 1}/${b.getDate()}`, `${g ? `${g.w}+${g.d} – ${g2.w}+${g2.d} · ` : ''}${weekStart(today()) === ws ? '本周' : '点此回到本周'}`)
+    + `<div class="card" style="padding:4px 12px">${rows}</div><p class="muted" style="text-align:center">点某一天进入日视图，点事项直接编辑</p>`;
+}
+function renderMonth() {
+  const d0 = parseYmd(ui.date), first = ymd(new Date(d0.getFullYear(), d0.getMonth(), 1));
+  const start = weekStart(first);
+  const cells = [];
+  for (let i = 0; i < 42; i += 1) {
+    const d = addDays(start, i), dt = parseYmd(d);
+    if (i % 7 === 0 && i > 0 && dt.getMonth() !== d0.getMonth()) break;
+    const acts = dayActs(d).slice().sort((x, y) => x.start - y.start);
+    const gi = i % 7 === 0 ? gaInfo(d) : null;
+    cells.push(`<div class="mc ${dt.getMonth() !== d0.getMonth() ? 'out' : ''} ${d === today() ? 'is-today' : ''} ${d === S.settings.due ? 'is-due' : ''}" data-act="goto-day" data-date="${d}">
+      <div class="mn"><b>${dt.getDate()}</b>${gi ? `<small>${gi.w}w</small>` : ''}</div>
+      ${d === S.settings.due ? '<div class="ml due">预产期</div>' : ''}
+      ${acts.slice(0, 3).map((x) => `<div class="ml ${x.done ? 'done' : ''}" style="--c:${typeOf(x.type).color}">${esc(x.title)}</div>`).join('')}
+      ${acts.length > 3 ? `<div class="more">+${acts.length - 3}</div>` : ''}</div>`);
+  }
+  const thisMonth = today().slice(0, 7) === ui.date.slice(0, 7);
+  $('#view').innerHTML = viewSeg() + rangeNav(`${d0.getFullYear()}年${d0.getMonth() + 1}月`, thisMonth ? '本月' : '点此回到本月')
+    + `<div class="month"><div class="mh">${['一', '二', '三', '四', '五', '六', '日'].map((w) => `<span>${w}</span>`).join('')}</div>
+      <div class="mg">${cells.join('')}</div></div>
+      <div class="legend">${S.types.map((t) => `<span><i style="background:${t.color}"></i>${esc(t.name)}</span>`).join('')}</div>`;
+}
 function renderPlan() {
+  if (ui.view === 'week') return renderWeek();
+  if (ui.view === 'month') return renderMonth();
   const acts = dayActs(ui.date).slice().sort((a, b) => a.start - b.start);
   const laneEnd = [], lane = {};
   acts.forEach((a) => {
@@ -181,7 +230,7 @@ function renderPlan() {
       <b data-act="edit-act" data-id="${a.id}">${esc(a.title)}</b><small class="tm">${hm(a.start)}–${hm(a.start + a.dur)}</small>
       <span class="rz" aria-label="拖动调整时长"></span></div>`;
   }).join('');
-  $('#view').innerHTML = `${dateNav()}
+  $('#view').innerHTML = `${viewSeg()}${dateNav()}
     <div style="margin-bottom:8px">${S.types.map((t) => `<button class="chip" data-act="quick-act" data-type="${t.id}"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</button>`).join('')}
       <button class="chip" data-act="new-act">+ 自定义</button></div>
     <p class="muted" style="margin:0 0 8px">按住 ⋮⋮ 拖动改时间，拖底边改时长，点空白处新建</p>
@@ -658,7 +707,7 @@ function renderSettings() {
       <label class="f" style="margin-top:12px">医嘱要点（一行一条，显示在营养页）<textarea data-set="notes" rows="4">${esc(st.notes)}</textarea></label></div>
     <div class="card"><h3>营养计划（按餐）</h3>
       ${st.meals.map((m, i) => `<div style="border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:10px">
-        <div class="grid3"><label class="f">餐次<input data-meal="${i}" data-k="name" value="${esc(m.name)}"></label>
+        <div class="grid3 meal-row"><label class="f">餐次<input data-meal="${i}" data-k="name" value="${esc(m.name)}"></label>
         <label class="f">时间<input type="time" data-meal="${i}" data-k="time" value="${m.time}"></label>
         <label class="f">热量占比%<input type="number" data-meal="${i}" data-k="share" value="${m.share}"></label></div>
         <label class="f">建议吃什么<textarea data-meal="${i}" data-k="plan" rows="2">${esc(m.plan)}</textarea></label></div>`).join('')}
@@ -729,6 +778,15 @@ function importData(file) {
 /* ========== 动作分发 ========== */
 const ACTIONS = {
   tab: (t) => switchTab(t.dataset.tab),
+  view: (t) => { ui.view = t.dataset.v; render(); },
+  'goto-day': (t) => { ui.date = t.dataset.date; ui.view = 'day'; render(); window.scrollTo(0, 0); },
+  shift: (t) => {
+    const n = Number(t.dataset.n);
+    if (!n) ui.date = today();
+    else if (ui.view === 'week') ui.date = addDays(ui.date, 7 * n);
+    else { const d = parseYmd(ui.date); ui.date = ymd(new Date(d.getFullYear(), d.getMonth() + n, 1)); }
+    render();
+  },
   day: (t) => { const n = Number(t.dataset.n); ui.date = n ? addDays(ui.date, n) : today(); render(); },
   'new-act': () => openActSheet(null),
   'quick-act': (t) => openActSheet(null, { type: t.dataset.type, start: ui.date === today() ? Math.ceil(nowMin() / 30) * 30 : 9 * 60 }),
@@ -795,7 +853,7 @@ function render() {
   const fresh = $('#view').cloneNode(false); // 换节点以清掉上一页绑定的监听
   $('#view').replaceWith(fresh);
   ({ today: renderToday, plan: renderPlan, food: renderFood, set: renderSettings })[ui.tab]();
-  if (ui.tab === 'plan') bindTimelineDrag();
+  if (ui.tab === 'plan' && ui.view === 'day') bindTimelineDrag();
   if (ui.tab === 'set') bindSettings();
   renderTop();
 }
