@@ -19,7 +19,7 @@ const NK = NUTRIENTS.map((n) => n.k);
 
 /* ========== 存储 ========== */
 const KEY = 'pp_v1';
-const APP_VERSION = '2026.11.26-10';
+const APP_VERSION = '2026.11.26-11';
 function defaultState() {
   return {
     settings: {
@@ -709,23 +709,33 @@ function saveGram() {
 // 新建 / 编辑自定义食物；idx 有值时是编辑「我的食物」里的第 idx 个
 function openNewFood(idx, fromSettings) {
   const old = idx != null ? S.myFoods[idx] : null;
-  const val = (k) => (old ? old.v[NK.indexOf(k)] : 0);
+  const serving = old?.u?.[0]?.[1] || (old ? 100 : '');
+  const val = (k) => (old ? (old.v[NK.indexOf(k)] * serving) / 100 : '');
   openSheet(`<h2>${old ? '编辑自定义食物' : '新建自定义食物'}</h2><form id="nf-form">
-    <label class="btn sm ghost block" style="text-align:center;margin-bottom:12px">📷 拍营养成分表 / 食物照片，自动填写<input type="file" accept="image/*" hidden id="nf-photo"></label>
+    <label class="btn sm ghost block" style="display:block;text-align:center;margin-bottom:12px">📷 拍营养成分表 / 食物照片，自动填写<input type="file" accept="image/*" hidden id="nf-photo"></label>
     <div id="nf-status" class="muted" style="margin:-4px 0 10px"></div>
     <label class="f">名称<input name="n" required value="${esc(old?.n || '')}" placeholder="如：妈妈做的红烧肉"></label>
-    <p class="muted">以下填每 100g 含量（包装营养成分表上能找到；不确定可只填热量和蛋白质）</p>
-    <div class="grid2">${NUTRIENTS.map((x) => `<label class="f">${x.label}(${x.unit})<input name="${x.k}" type="number" step="any" inputmode="decimal" value="${round(val(x.k), 1)}"></label>`).join('')}
-      <label class="f">一份约(g)<input name="unit" type="number" inputmode="decimal" value="${old?.u?.[0]?.[1] || ''}" placeholder="可不填"></label></div>
+    <label class="f">① 一份的重量(g)<input name="unit" type="number" step="any" inputmode="decimal" required value="${serving}" placeholder="如：一盒酸奶 100、一个面包 80"></label>
+    <p class="muted" style="margin:-4px 0 8px">② 这一份含多少营养（不确定可只填热量和蛋白质）</p>
+    <div class="grid2">${NUTRIENTS.map((x) => `<label class="f">${x.label}(${x.unit})<input name="${x.k}" type="number" step="any" inputmode="decimal" value="${old ? round(val(x.k), 1) : ''}" placeholder="0"></label>`).join('')}</div>
+    <p class="muted" id="nf-per100"></p>
     ${old ? '<p class="muted">修改后只影响之后的记录，已经记下的不变</p>' : ''}
     <div class="actions">${old ? `<button type="button" class="btn ghost" data-act="del-myfood" data-i="${idx}">删除</button>` : ''}
       <button class="btn">${old ? '保存' : '保存到我的食物'}</button></div></form>`);
+  const showPer100 = () => {
+    const form = $('#nf-form'); const g = Number(form.unit.value);
+    $('#nf-per100').textContent = g > 0 ? `折合每 100g：${round((Number(form.kcal.value) || 0) * 100 / g)} kcal · 蛋白 ${round((Number(form.p.value) || 0) * 100 / g, 1)}g` : '';
+  };
+  $('#nf-form').addEventListener('input', showPer100); showPer100();
   $('#nf-photo').onchange = (e) => { if (e.target.files[0]) recognizeFoodLabel(e.target.files[0]); e.target.value = ''; };
   $('#nf-form').onsubmit = (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
     const n = f.n.trim(); if (!n) return toast('请填写名称');
-    const food = { n, cat: '我的', mine: true, v: NK.map((k) => Math.max(0, Number(f[k]) || 0)), u: f.unit ? [['一份', Number(f.unit)]] : undefined };
+    const g = Number(f.unit);
+    if (!(g > 0)) return toast('先填一份的重量');
+    // 按一份录入，内部统一换算成每 100g 存储
+    const food = { n, cat: '我的', mine: true, v: NK.map((k) => round((Math.max(0, Number(f[k]) || 0) * 100) / g, 2)), u: [['一份', g]] };
     const rest = S.myFoods.filter((x, i) => i !== idx && x.n !== n);
     S.myFoods = old ? [...rest.slice(0, idx), food, ...rest.slice(idx)] : [food, ...rest];
     save(); toast('已保存');
@@ -749,8 +759,10 @@ async function recognizeFoodLabel(file) {
     if (!Array.isArray(r.per100)) throw new Error('格式不对');
     const form = $('#nf-form'); if (!form) return;
     if (r.name && !form.n.value.trim()) form.n.value = String(r.name).slice(0, 30);
-    NK.forEach((k, i) => { form[k].value = round(Math.max(0, Number(r.per100[i]) || 0), 1); });
-    if (r.serving && !form.unit.value) form.unit.value = Math.round(Number(r.serving)) || '';
+    const g = Number(form.unit.value) || Math.round(Number(r.serving)) || 100;
+    form.unit.value = g;
+    NK.forEach((k, i) => { form[k].value = round((Math.max(0, Number(r.per100[i]) || 0) * g) / 100, 1); });
+    form.dispatchEvent(new Event('input'));
     st.textContent = r.from === 'label' ? '✓ 已按营养成分表填好，请核对一下' : '✓ 没看到营养成分表，已按常见做法估算，请核对';
   } catch (e) {
     st.textContent = `识别失败：${e.message}`;
