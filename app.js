@@ -19,7 +19,7 @@ const NK = NUTRIENTS.map((n) => n.k);
 
 /* ========== 存储 ========== */
 const KEY = 'pp_v1';
-const APP_VERSION = '2026.11.26-5';
+const APP_VERSION = '2026.11.26-6';
 function defaultState() {
   return {
     settings: {
@@ -95,9 +95,13 @@ function renderTop() {
     return;
   }
   const pct = Math.max(0, Math.min(100, (g.passed / 280) * 100));
-  const leftTxt = g.left > 0 ? `距预产期 ${g.left} 天` : g.left === 0 ? '今天就是预产期' : `已过预产期 ${-g.left} 天`;
-  $('#top').innerHTML = `<div class="ga"><b>${g.w}<small>w</small>+${g.d}<small>d</small></b>
-    <span>${isToday ? '今天' : ui.date.slice(5)} · ${leftTxt}</span></div>
+  const due = parseYmd(S.settings.due);
+  const left = g.left === 0 ? '<span>今天是</span><b class="txt">预产期</b>'
+    : `<span>${g.left > 0 ? '距预产期' : '已过预产期'}</span><b>${Math.abs(g.left)}</b><small>天</small>`;
+  $('#top').innerHTML = `<div class="top-row">
+      <div class="ga"><b>${g.w}<small>w</small>+${g.d}<small>d</small></b>
+        <span>${isToday ? '今天' : ui.date.slice(5)} · 预产期 ${due.getMonth() + 1}/${due.getDate()} 周${WEEK[due.getDay()]}</span></div>
+      <div class="left-days">${left}</div></div>
     <div class="bar"><i style="width:${pct}%"></i></div>`;
 }
 
@@ -110,15 +114,8 @@ function renderToday() {
   const T = S.settings.targets;
   let html = '';
   if (g) {
-    const toTerm = 259 - g.passed; // 37w0d
     const tips = MILESTONES.filter(([w]) => w >= g.w - 1 && w <= g.w + 2);
     const next = MILESTONES.find(([w]) => w > g.w);
-    html += `<div class="card countdown">
-      <div><div class="muted">距预产期</div><div class="big">${Math.max(g.left, 0)}<small>天</small></div>
-        <div class="muted">${S.settings.due} 周${WEEK[parseYmd(S.settings.due).getDay()]}</div></div>
-      <div><div class="muted">已孕</div><div style="font:600 22px var(--serif)">${g.passed} / 280 天</div>
-        <div class="muted" style="margin-top:6px">${toTerm > 0 ? `距足月(37w) ${toTerm} 天` : '已足月 ✓'}</div></div>
-    </div>`;
     const nm = nowMin();
     const postMeal = S.settings.gdm && S.settings.meals.filter((m) => !/点心|加餐/.test(m.name)).find((m) => nm >= toMin(m.time) && nm <= toMin(m.time) + 120);
     if (postMeal) html += `<div class="card"><div class="tip" style="background:var(--sage-soft)"><b>${esc(postMeal.name)}后 2 小时内</b>：抬腿 + 举水瓶 10 分钟，再散步 10–20 分钟</div></div>`;
