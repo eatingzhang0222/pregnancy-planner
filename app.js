@@ -625,19 +625,31 @@ async function parseText() {
 
 /* 识别结果确认 */
 function openReview(items, source) {
-  ui.review = items;
+  ui.review = items; ui.reviewSrc = source;
   const rows = items.map((it) => {
     const k = it.v ? Math.round((it.v[0] * it.g) / 100) : '?';
-    return `<div class="food-row"><div class="grow">${esc(it.name)}${it.v ? '' : ' <span style="color:var(--rose);font-size:12px">未匹配，请选库内食物或补热量</span>'}</div>
+    const hint = [it.unsure ? '<span style="color:var(--amber)">⚠ 拿不准，请核对</span>' : '', it.seen ? `看到：${esc(it.seen)}` : '',
+      it.v ? '' : '<span style="color:var(--rose)">未匹配，改成库内名称或用「选食物」</span>'].filter(Boolean).join(' · ');
+    return `<div class="food-row"><div class="grow"><input class="inp" style="margin:0;padding:6px 8px;font-size:15px" value="${esc(it.name)}" data-rname="${it.id}">
+      ${hint ? `<div class="k" style="margin-top:2px">${hint}</div>` : ''}</div>
       <input class="inp num-in" type="number" inputmode="decimal" value="${it.g}" data-rid="${it.id}">g
       <span class="k" style="width:58px;text-align:right">${k} kcal</span>
       <button class="icon-btn" data-act="rm-review" data-id="${it.id}" aria-label="移除">×</button></div>`;
   }).join('');
   openSheet(`<h2>确认识别结果</h2>
     ${source && source.startsWith('data:') ? `<img class="preview-img" src="${source}" alt="">` : ''}
-    <p class="muted">克数可直接改；未匹配的项会被跳过，可点「选食物」单独添加</p>
+    <p class="muted">认错了就直接改菜名（会按食物库重新算营养），克数也可改；未匹配的项会被跳过</p>
     ${rows || '<div class="empty">没识别到食物</div>'}
     <div class="actions"><button class="btn ghost" data-act="pick-food">选食物</button><button class="btn" data-act="confirm-review">全部加入</button></div>`);
+  document.querySelectorAll('[data-rname]').forEach((inp) => {
+    inp.onchange = () => {
+      const food = findFood(inp.value.trim());
+      ui.review = ui.review.map((x) => (x.id === inp.dataset.rname
+        ? { ...x, name: food ? food.n : inp.value.trim(), v: food ? food.v : x.v, unsure: false } : x));
+      openReview(ui.review, source);
+      if (!food) toast('食物库里没找到这个名称，营养沿用 AI 估算');
+    };
+  });
   document.querySelectorAll('[data-rid]').forEach((inp) => {
     inp.oninput = () => { ui.review = ui.review.map((x) => (x.id === inp.dataset.rid ? { ...x, g: Number(inp.value) || 0 } : x)); };
   });
@@ -664,24 +676,36 @@ async function callLLM(messages) {
   if (!content) throw new Error('返回为空');
   return content;
 }
-const RECOG_PROMPT = '你是注册营养师。识别用户给出的图片或文字里的食物，估算实际重量(克)，并按《中国食物成分表》估算每100g营养。'
-  + '只输出 JSON 数组，不要任何解释。每项格式：{"name":"食物名","grams":数字,"per100":[热量kcal,蛋白质g,脂肪g,碳水g,钙mg,铁mg,膳食纤维g]}。'
-  + '混合菜请拆成主要食材（含烹调油）分别列出。';
+const RECOG_PROMPT = '你是注册营养师，擅长从照片识别中式家常菜。步骤：先仔细看每样食物的颜色、形状、切法、质地和所在餐具，再判断是什么；'
+  + '用户提供了这一餐的饮食计划和常用食物清单，实际吃的大概率在其中，外观吻合时优先用清单里的名称，外观明显不符时如实写出别的名称，不要硬套。'
+  + '按碗/盘/勺大小估算实际重量(克)。混合菜拆成主要食材（含烹调油）分别列出。'
+  + '只输出 JSON 数组，不要任何解释。每项格式：{"seen":"外观描述(15字内)","name":"食物名","grams":数字,"sure":true或false,'
+  + '"per100":[热量kcal,蛋白质g,脂肪g,碳水g,钙mg,铁mg,膳食纤维g]}。看不清或拿不准时 sure 写 false。';
+function recogContext() {
+  const meal = S.settings.meals.find((m) => m.id === ui.meal);
+  const names = allFoods().map((f) => f.n).join('、');
+  return `${meal ? `这一餐是「${meal.name}」，计划：\n${meal.plan}\n` : ''}常用食物清单：${names}`;
+}
 async function aiRecognize({ text, image }) {
+  const ctx = recogContext();
   const content = image
-    ? [{ type: 'text', text: '识别这顿饭' }, { type: 'image_url', image_url: { url: image } }]
-    : `识别：${text}`;
+    ? [{ type: 'text', text: `${ctx}\n\n识别照片里这顿饭吃了什么。` }, { type: 'image_url', image_url: { url: image } }]
+    : `${ctx}\n\n识别：${text}`;
   const out = await callLLM([{ role: 'system', content: RECOG_PROMPT }, { role: 'user', content }]);
   const m = out.match(/\[[\s\S]*\]/);
   if (!m) throw new Error('没解析到结果');
   const arr = JSON.parse(m[0]);
   if (!Array.isArray(arr)) throw new Error('格式不对');
-  return arr.filter((x) => x && x.name && Array.isArray(x.per100)).map((x) => ({
-    id: uid(), name: String(x.name).slice(0, 30), g: Math.max(1, Math.round(Number(x.grams) || 100)),
-    v: NK.map((_, i) => Math.max(0, Number(x.per100[i]) || 0)),
-  }));
+  return arr.filter((x) => x && x.name).map((x) => {
+    const name = String(x.name).slice(0, 30);
+    const food = findFood(name);
+    // 库里有的食物用库内营养数据，模型只负责认菜和估克数
+    const v = food ? food.v : Array.isArray(x.per100) ? NK.map((_, i) => Math.max(0, Number(x.per100[i]) || 0)) : null;
+    return { id: uid(), name: food ? food.n : name, g: Math.max(1, Math.round(Number(x.grams) || 100)), v,
+      seen: String(x.seen || '').slice(0, 30), unsure: x.sure === false };
+  });
 }
-function compressImage(file, max = 1024) {
+function compressImage(file, max = 1536) {
   return new Promise((resolve, reject) => {
     const img = new Image(), url = URL.createObjectURL(file);
     img.onload = () => {
@@ -689,7 +713,7 @@ function compressImage(file, max = 1024) {
       const c = document.createElement('canvas');
       c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.8));
+      URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.85));
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
     img.src = url;
@@ -854,7 +878,7 @@ const ACTIONS = {
   'new-food': openNewFood,
   'text-food': openTextFood,
   'parse-text': parseText,
-  'rm-review': (t) => { openReview(ui.review.filter((x) => x.id !== t.dataset.id)); },
+  'rm-review': (t) => { openReview(ui.review.filter((x) => x.id !== t.dataset.id), ui.reviewSrc); },
   'confirm-review': confirmReview,
   'ai-advice': aiAdvice,
   'reset-targets': () => { S.settings = { ...S.settings, targets: { ...DEFAULT_TARGETS } }; save(); render(); toast('已恢复默认'); },
