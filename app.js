@@ -755,7 +755,9 @@ function bindSettings() {
   });
 }
 function exportData() {
-  const blob = new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' });
+  // 备份里不带 API Key，避免文件外传时泄露
+  const safe = { ...S, settings: { ...S.settings, ai: { ...S.settings.ai, key: '' } } };
+  const blob = new Blob([JSON.stringify(safe, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = `孕晚期手帐备份_${today()}.json`;
   document.body.appendChild(a); a.click(); a.remove();
@@ -769,7 +771,9 @@ function importData(file) {
       const s = JSON.parse(r.result);
       if (!s.settings || !s.types) throw new Error('不是本工具的备份文件');
       if (!confirm('导入会覆盖当前所有数据，继续？')) return;
-      localStorage.setItem(KEY, JSON.stringify(s)); S = load(); render(); toast('导入成功');
+      // 备份里没有 Key 时保留本机已填的 Key
+      const ai = { ...(s.settings.ai || {}), key: s.settings.ai?.key || S.settings.ai.key };
+      localStorage.setItem(KEY, JSON.stringify({ ...s, settings: { ...s.settings, ai } })); S = load(); render(); toast('导入成功');
     } catch (e) { toast(`导入失败：${e.message}`); }
   };
   r.readAsText(file);
