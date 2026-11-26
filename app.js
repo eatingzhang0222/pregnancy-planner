@@ -19,7 +19,7 @@ const NK = NUTRIENTS.map((n) => n.k);
 
 /* ========== 存储 ========== */
 const KEY = 'pp_v1';
-const APP_VERSION = '2026.11.26-8';
+const APP_VERSION = '2026.11.26-10';
 function defaultState() {
   return {
     settings: {
@@ -186,7 +186,7 @@ function renderWeek() {
         <span>${hm(x.start)}</span>${esc(x.title)}</div>`).join('') || '<span class="muted">—</span>'}</div></div>`;
   }).join('');
   $('#view').innerHTML = viewSeg() + rangeNav(`${a.getMonth() + 1}/${a.getDate()} – ${b.getMonth() + 1}/${b.getDate()}`, `${g ? `${g.w}+${g.d} – ${g2.w}+${g2.d} · ` : ''}${weekStart(today()) === ws ? '本周' : '点此回到本周'}`)
-    + `<div class="card" style="padding:4px 12px">${rows}</div><p class="muted" style="text-align:center">点某一天进入日视图，点事项编辑，长按事项可拖到别的日子</p>`;
+    + `<div class="card" style="padding:4px 12px">${rows}</div><p class="muted" style="text-align:center">点某一天进入日视图，点事项编辑，长按事项可拖到别的日子；左右滑切换日/周/月</p>`;
 }
 // 有预产期时：只看「本周一（或最早一条日程所在周）→ 预产期」这一段
 function renderCountdownCal() {
@@ -215,6 +215,28 @@ function renderCountdownCal() {
     + `<div class="month"><div class="mh">${['一', '二', '三', '四', '五', '六', '日'].map((w) => `<span>${w}</span>`).join('')}</div>
       <div class="mg">${cells.join('')}</div></div>
       <div class="legend">${S.types.map((t) => `<span><i style="background:${t.color}"></i>${esc(t.name)}</span>`).join('')}</div>`;
+}
+// 日程页左右滑：左滑 日→周→月，右滑反过来；拖动事项时不触发
+function bindPlanSwipe() {
+  const v = $('#view');
+  let s0 = null;
+  v.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || e.target.closest('.grip, .rz, input, select, textarea')) { s0 = null; return; }
+    s0 = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() };
+  }, { passive: true });
+  v.addEventListener('touchend', (e) => {
+    if (!s0 || Date.now() < dragGuardUntil) { s0 = null; return; }
+    const dx = e.changedTouches[0].clientX - s0.x, dy = e.changedTouches[0].clientY - s0.y;
+    const quick = Date.now() - s0.t < 700;
+    s0 = null;
+    if (!quick || Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx) * 0.6) return;
+    const order = VIEWS.map(([k]) => k);
+    const next = order[order.indexOf(ui.view) + (dx < 0 ? 1 : -1)];
+    if (!next) return;
+    ui.view = next; dragGuardUntil = Date.now() + 300;
+    render();
+    $('#view').classList.add(dx < 0 ? 'slide-l' : 'slide-r');
+  }, { passive: true });
 }
 // 周视图：长按事项后拖到另一天（保持原时间）
 function bindWeekDrag() {
@@ -318,7 +340,7 @@ function renderPlan() {
   $('#view').innerHTML = `${viewSeg()}${dateNav()}
     <div style="margin-bottom:8px">${S.types.map((t) => `<button class="chip" data-act="quick-act" data-type="${t.id}"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</button>`).join('')}
       <button class="chip" data-act="new-act">+ 自定义</button></div>
-    <p class="muted" style="margin:0 0 8px">按住 ⋮⋮ 拖动改时间，拖底边改时长，点空白处新建</p>
+    <p class="muted" style="margin:0 0 8px">点事项编辑，按住 ⋮⋮ 拖动改时间，拖底边改时长，点空白处新建；左右滑切换日/周/月</p>
     <div class="timeline" id="tl" style="height:${(DAY_E - DAY_S) * PX + 10}px">${hours}${nowLine}${evs}</div>`;
 }
 function bindTimelineDrag() {
@@ -684,21 +706,55 @@ function saveGram() {
     : mergeItems([...items, { id: uid(), name: food.n, g, v: food.v }]);
   setMealItems(ui.date, ui.meal, next); closeSheet(); render(); toast(item ? '已更新' : '已加入');
 }
-function openNewFood() {
-  openSheet(`<h2>新建自定义食物</h2><form id="nf-form">
-    <label class="f">名称<input name="n" required placeholder="如：妈妈做的红烧肉"></label>
+// 新建 / 编辑自定义食物；idx 有值时是编辑「我的食物」里的第 idx 个
+function openNewFood(idx, fromSettings) {
+  const old = idx != null ? S.myFoods[idx] : null;
+  const val = (k) => (old ? old.v[NK.indexOf(k)] : 0);
+  openSheet(`<h2>${old ? '编辑自定义食物' : '新建自定义食物'}</h2><form id="nf-form">
+    <label class="btn sm ghost block" style="text-align:center;margin-bottom:12px">📷 拍营养成分表 / 食物照片，自动填写<input type="file" accept="image/*" hidden id="nf-photo"></label>
+    <div id="nf-status" class="muted" style="margin:-4px 0 10px"></div>
+    <label class="f">名称<input name="n" required value="${esc(old?.n || '')}" placeholder="如：妈妈做的红烧肉"></label>
     <p class="muted">以下填每 100g 含量（包装营养成分表上能找到；不确定可只填热量和蛋白质）</p>
-    <div class="grid2">${NUTRIENTS.map((x) => `<label class="f">${x.label}(${x.unit})<input name="${x.k}" type="number" step="any" inputmode="decimal" value="0"></label>`).join('')}
-      <label class="f">一份约(g)<input name="unit" type="number" inputmode="decimal" placeholder="可不填"></label></div>
-    <div class="actions"><button class="btn">保存到我的食物</button></div></form>`);
+    <div class="grid2">${NUTRIENTS.map((x) => `<label class="f">${x.label}(${x.unit})<input name="${x.k}" type="number" step="any" inputmode="decimal" value="${round(val(x.k), 1)}"></label>`).join('')}
+      <label class="f">一份约(g)<input name="unit" type="number" inputmode="decimal" value="${old?.u?.[0]?.[1] || ''}" placeholder="可不填"></label></div>
+    ${old ? '<p class="muted">修改后只影响之后的记录，已经记下的不变</p>' : ''}
+    <div class="actions">${old ? `<button type="button" class="btn ghost" data-act="del-myfood" data-i="${idx}">删除</button>` : ''}
+      <button class="btn">${old ? '保存' : '保存到我的食物'}</button></div></form>`);
+  $('#nf-photo').onchange = (e) => { if (e.target.files[0]) recognizeFoodLabel(e.target.files[0]); e.target.value = ''; };
   $('#nf-form').onsubmit = (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
     const n = f.n.trim(); if (!n) return toast('请填写名称');
-    const food = { n, cat: '我的', mine: true, v: NK.map((k) => Number(f[k]) || 0), u: f.unit ? [['一份', Number(f.unit)]] : undefined };
-    S.myFoods = [food, ...S.myFoods.filter((x) => x.n !== n)]; save();
-    toast('已保存'); openGramSheet(food);
+    const food = { n, cat: '我的', mine: true, v: NK.map((k) => Math.max(0, Number(f[k]) || 0)), u: f.unit ? [['一份', Number(f.unit)]] : undefined };
+    const rest = S.myFoods.filter((x, i) => i !== idx && x.n !== n);
+    S.myFoods = old ? [...rest.slice(0, idx), food, ...rest.slice(idx)] : [food, ...rest];
+    save(); toast('已保存');
+    if (fromSettings) { closeSheet(); render(); } else openGramSheet(food);
   };
+}
+const LABEL_PROMPT = '你是注册营养师。用户发来包装食品的营养成分表，或一份食物/菜的照片。'
+  + '有营养成分表就按表读取（能量是 kJ 时换算成 kcal：kJ÷4.184；表是"每份"时按份量换算成每100g）；没有表就按《中国食物成分表》估算。'
+  + '只输出 JSON：{"name":"食物名","per100":[热量kcal,蛋白质g,脂肪g,碳水g,钙mg,铁mg,膳食纤维g],"serving":每份克数或null,"from":"label 或 estimate"}，表里没有的项填 0。';
+async function recognizeFoodLabel(file) {
+  if (!hasAI()) return toast('识别需要先在设置里配置 AI 接口');
+  const st = $('#nf-status');
+  st.innerHTML = '<span class="spin"></span> 识别中…';
+  try {
+    const img = await compressImage(file, 1400);
+    const out = await callLLM([{ role: 'system', content: LABEL_PROMPT },
+      { role: 'user', content: [{ type: 'text', text: '识别这张图的营养成分' }, { type: 'image_url', image_url: { url: img } }] }]);
+    const m = out.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('没读到结果');
+    const r = JSON.parse(m[0]);
+    if (!Array.isArray(r.per100)) throw new Error('格式不对');
+    const form = $('#nf-form'); if (!form) return;
+    if (r.name && !form.n.value.trim()) form.n.value = String(r.name).slice(0, 30);
+    NK.forEach((k, i) => { form[k].value = round(Math.max(0, Number(r.per100[i]) || 0), 1); });
+    if (r.serving && !form.unit.value) form.unit.value = Math.round(Number(r.serving)) || '';
+    st.textContent = r.from === 'label' ? '✓ 已按营养成分表填好，请核对一下' : '✓ 没看到营养成分表，已按常见做法估算，请核对';
+  } catch (e) {
+    st.textContent = `识别失败：${e.message}`;
+  }
 }
 
 /* 文字录入 / 本地解析 */
@@ -917,8 +973,10 @@ function renderSettings() {
       <p class="muted">联网示例：OpenRouter 接口 https://openrouter.ai/api/v1，联网模型填「模型名:online」；OpenAI 接口填 gpt-4o-mini-search-preview，附加参数填 {"web_search_options":{}}</p>
       <button class="btn sm ghost" data-act="test-ai">测试连接</button> <span id="ai-test" class="muted"></span></div>
     <div class="card"><h3>我的食物</h3>
-      ${S.myFoods.length ? S.myFoods.map((f, i) => `<div class="list-item"><div class="grow">${esc(f.n)} <span class="muted">${f.v[0]}kcal/100g</span></div>
-        <button class="icon-btn" data-act="del-myfood" data-i="${i}">×</button></div>`).join('') : '<div class="empty">在「选食物」里可新建</div>'}</div>
+      ${S.myFoods.map((f, i) => `<div class="list-item" data-act="edit-myfood" data-i="${i}"><div class="grow">${esc(f.n)}
+          <div class="muted">每100g ${round(f.v[0])}kcal · 蛋白 ${round(f.v[1], 1)}g · 碳水 ${round(f.v[3], 1)}g · 脂肪 ${round(f.v[2], 1)}g</div></div>
+        <span class="muted">编辑 ›</span></div>`).join('') || '<div class="empty">还没有自定义食物</div>'}
+      <button class="btn sm ghost" style="margin-top:8px" data-act="add-myfood">＋ 新建（可拍营养成分表）</button></div>
     <div class="card"><h3>数据备份</h3>
       <p class="muted" style="margin-top:0">数据只存在本机浏览器里。换手机或清理 Safari 前记得导出。</p>
       <div class="grid3"><button class="btn sm ghost" data-act="export">导出</button>
@@ -1014,7 +1072,7 @@ const ACTIONS = {
     openGramSheet({ n: it.name, v: it.v, u: base?.u }, it);
   },
   'del-item': (t) => { setMealItems(ui.date, ui.meal, (mealsOf(ui.date)[ui.meal] || []).filter((x) => x.id !== t.dataset.id)); closeSheet(); render(); toast('已删除'); },
-  'new-food': openNewFood,
+  'new-food': () => openNewFood(),
   'text-food': openTextFood,
   'parse-text': parseText,
   'rm-review': (t) => { openReview(ui.review.filter((x) => x.id !== t.dataset.id), ui.reviewSrc); },
@@ -1023,7 +1081,13 @@ const ACTIONS = {
   'reset-targets': () => { S.settings = { ...S.settings, targets: { ...DEFAULT_TARGETS } }; save(); render(); toast('已恢复默认'); },
   'add-type': () => { S.types = [...S.types, { id: uid(), name: '新活动', color: '#6E9BC5', dur: 60 }]; save(); render(); },
   'del-type': (t) => { if (confirm('删除这个活动类型？已排的活动会保留（显示为"其他"颜色）')) { S.types = S.types.filter((_, i) => i !== Number(t.dataset.i)); save(); render(); } },
-  'del-myfood': (t) => { S.myFoods = S.myFoods.filter((_, i) => i !== Number(t.dataset.i)); save(); render(); },
+  'del-myfood': (t) => {
+    const f = S.myFoods[Number(t.dataset.i)];
+    if (!f || !confirm(`删除「${f.n}」？已经记下的不受影响`)) return;
+    S.myFoods = S.myFoods.filter((_, i) => i !== Number(t.dataset.i)); save(); closeSheet(); render();
+  },
+  'edit-myfood': (t) => openNewFood(Number(t.dataset.i), true),
+  'add-myfood': () => openNewFood(null, true),
   'test-ai': async () => {
     const out = $('#ai-test'); out.textContent = '测试中…';
     try { await callLLM([{ role: 'user', content: '回复"ok"' }]); out.textContent = '✓ 连接正常'; }
@@ -1071,6 +1135,7 @@ function render() {
   ({ today: renderToday, plan: renderPlan, food: renderFood, set: renderSettings })[ui.tab]();
   if (ui.tab === 'plan' && ui.view === 'day') bindTimelineDrag();
   if (ui.tab === 'plan' && ui.view === 'week') bindWeekDrag();
+  if (ui.tab === 'plan') bindPlanSwipe();
   if (ui.tab === 'set') bindSettings();
   renderTop();
 }
