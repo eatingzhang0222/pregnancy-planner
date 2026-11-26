@@ -1,6 +1,6 @@
 // 离线缓存：网络优先（每次向服务器确认新版本），断网时用缓存
-const C = 'pp-v7';
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'chat.js', 'meds.js', 'data.js', 'manifest.webmanifest', 'icon.png'];
+const C = 'pp-v8';
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'chat.js', 'meds.js', 'data.js', 'foods-db.js', 'manifest.webmanifest', 'icon.png'];
 self.addEventListener('install', (e) => {
   self.skipWaiting();
   e.waitUntil(caches.open(C).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))));

@@ -19,7 +19,7 @@ const NK = NUTRIENTS.map((n) => n.k);
 
 /* ========== 存储 ========== */
 const KEY = 'pp_v1';
-const APP_VERSION = '2026.11.26-7';
+const APP_VERSION = '2026.11.26-8';
 function defaultState() {
   return {
     settings: {
@@ -137,7 +137,7 @@ function renderToday() {
   </div>`;
   html += `<div class="card"><h3>今日营养 <button class="btn sm ghost" data-act="tab" data-tab="food">去记录</button></h3>
     ${kcalRing(tot.kcal, T.kcal)}
-    ${['p', 'ca', 'fe'].map((k) => nutBar(k, tot[k], T[k])).join('')}
+    ${['p', 'c', 'f'].map((k) => nutBar(k, tot[k], T[k])).join('')}
   </div>`;
   $('#view').innerHTML = html;
 }
@@ -464,12 +464,14 @@ function kcalRing(v, t) {
     <div><div style="font:600 26px var(--serif)">${Math.round(v)} <span class="muted">/ ${t} kcal</span></div>
     <div class="muted">${v < t ? `还可摄入约 ${Math.round(t - v)} kcal` : `已超出 ${Math.round(v - t)} kcal`}</div></div></div>`;
 }
+const CAP_KEYS = ['kcal', 'c', 'f']; // 这几项超标要提醒
 function nutBar(k, v, t) {
   const n = NUTRIENTS.find((x) => x.k === k);
   const r = t ? v / t : 0;
   const cls = r > 1.15 ? 'over' : r < 0.8 ? 'low' : '';
   const gap = t - v;
   const gapTxt = gap > 0 ? `<span class="gap" style="color:var(--amber)">差 ${round(gap, k === 'fe' ? 1 : 0)}${n.unit}</span>`
+    : r > 1.15 && CAP_KEYS.includes(k) ? `<span class="gap" style="color:var(--rose)">超 ${Math.round(-gap)}${n.unit}</span>`
     : `<span class="gap" style="color:var(--sage)">达标</span>`;
   return `<div class="nut"><div class="row"><span class="grow">${n.label}</span>
     <span class="val">${round(v, k === 'fe' ? 1 : 0)} / ${t}${n.unit}</span>${gapTxt}</div>
@@ -488,7 +490,7 @@ function suggestions(date) {
   const where = rest.map((m) => m.name).slice(0, 2).join(' / ');
   const whereTxt = where ? `，可放在 ${where}` : '';
   const lead = restShare > 0 ? '按计划吃完剩余餐次后，预计' : '';
-  ['p', 'ca', 'fe', 'fb', 'kcal'].forEach((k) => {
+  ['p', 'c', 'kcal'].forEach((k) => {
     const gap = T[k] * (1 - restShare) - tot[k];
     if (gap <= T[k] * 0.1) return;
     const n = NUTRIENTS.find((x) => x.k === k);
@@ -500,7 +502,7 @@ function suggestions(date) {
     const fit = need.filter((x) => x.g <= x.portion * 2.5).slice(0, 3);
     const opts = fit.length ? fit.map((x) => `${x.name} ${x.g}g`).join(' 或 ')
       : `${need[0].name} ${need[0].portion * 2}g 等（一次补不完，分到几餐）`;
-    out.push(`<div class="sugg"><b>${lead}${n.label}还差 ${round(gap, k === 'fe' ? 1 : 0)}${n.unit}</b>：可补 ${opts}${whereTxt}${k === 'fe' ? '（食物难补足，按医嘱用补充剂；猪肝每周 1–2 次即可）' : ''}${k === 'ca' ? '（医嘱钙片 600mg 未计入）' : ''}</div>`);
+    out.push(`<div class="sugg"><b>${lead}${n.label}还差 ${round(gap, k === 'fe' ? 1 : 0)}${n.unit}</b>：可补 ${opts}${whereTxt}${k === 'c' && S.settings.gdm ? '（选低 GI 主食，注意餐后血糖）' : ''}</div>`);
   });
   const fruit = catGrams(date, '水果'), veg = catGrams(date, '蔬菜');
   if (S.settings.gdm && fruit > 200) out.push(`<div class="sugg" style="border-color:var(--rose)"><b>水果已 ${Math.round(fruit)}g</b>：超过每日 200g 上限，今天后面别再吃水果了</div>`);
@@ -522,7 +524,7 @@ function foodOverview() {
   const hasAny = Object.values(m).some((x) => x.length);
   return `<div class="card"><h3>当日总览 <em>${hasAny ? '' : '还没有记录'}</em></h3>
       ${kcalRing(tot.kcal, T.kcal)}
-      ${NK.filter((k) => k !== 'kcal').map((k) => nutBar(k, tot[k], T[k])).join('')}</div>
+      ${['p', 'c', 'f'].map((k) => nutBar(k, tot[k], T[k])).join('')}</div>
     <div class="card"><h3>各餐情况</h3>
       ${S.settings.meals.map((meal) => {
         const items = m[meal.id] || [];
@@ -553,10 +555,10 @@ function foodMeal(id) {
       ${items.length ? items.map((it) => {
         const n = itemNut(it);
         return `<div class="food-row" data-act="edit-item" data-id="${it.id}"><div class="grow">${esc(it.name)} <span class="muted">${it.g}g</span>
-          <div class="k">蛋白 ${round(n.p, 1)}g · 钙 ${Math.round(n.ca)}mg · 铁 ${round(n.fe, 1)}mg</div></div>
+          <div class="k">蛋白 ${round(n.p, 1)}g · 碳水 ${round(n.c, 1)}g · 脂肪 ${round(n.f, 1)}g</div></div>
           <div class="val">${Math.round(n.kcal)} kcal</div></div>`;
       }).join('') : '<div class="empty">还没有记录，点上面的按钮添加</div>'}
-      ${items.length ? `<div style="margin-top:10px">${['kcal', 'p', 'ca', 'fe'].map((k) => nutBar(k, tot[k], round(T[k] * share, k === 'fe' ? 1 : 0))).join('')}</div>` : ''}
+      ${items.length ? `<div style="margin-top:10px">${['kcal', 'p', 'c', 'f'].map((k) => nutBar(k, tot[k], round(T[k] * share, k === 'fe' ? 1 : 0))).join('')}</div>` : ''}
     </div>`;
 }
 
@@ -593,7 +595,7 @@ function openGramSheet(food, item) {
   const calc = () => {
     const g = Number($('#gram-in').value) || 0;
     const n = itemNut({ g, v: food.v });
-    $('#gram-calc').textContent = NUTRIENTS.map((x) => `${x.label} ${round(n[x.k], x.k === 'kcal' || x.k === 'ca' ? 0 : 1)}${x.unit}`).join(' · ');
+    $('#gram-calc').textContent = NUTRIENTS.filter((x) => ['kcal', 'p', 'c', 'f'].includes(x.k)).map((x) => `${x.label} ${round(n[x.k], x.k === 'kcal' ? 0 : 1)}${x.unit}`).join(' · ');
   };
   $('#gram-in').oninput = calc; calc();
 }
