@@ -70,7 +70,7 @@ function toast(msg) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on'), 2000);
 }
 function openSheet(html) {
-  $('#sheet').innerHTML = html;
+  $('#sheet').innerHTML = `<button class="sheet-x" data-act="close-sheet" aria-label="关闭">×</button>${html}`;
   $('#sheet').scrollTop = 0;
   $('#mask').classList.add('on'); $('#sheet').classList.add('on');
 }
@@ -782,6 +782,7 @@ function importData(file) {
 /* ========== 动作分发 ========== */
 const ACTIONS = {
   tab: (t) => switchTab(t.dataset.tab),
+  'close-sheet': closeSheet,
   view: (t) => { ui.view = t.dataset.v; render(); },
   'goto-day': (t) => { ui.date = t.dataset.date; ui.view = 'day'; render(); window.scrollTo(0, 0); },
   shift: (t) => {
@@ -845,6 +846,13 @@ document.addEventListener('change', (e) => {
   if (e.target.id === 'photo-in' && e.target.files[0]) handlePhoto(e.target.files[0]);
 });
 $('#mask').addEventListener('click', closeSheet);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+// 从弹层顶部下拉关闭
+(() => {
+  const sh = $('#sheet'); let y0 = null;
+  sh.addEventListener('touchstart', (e) => { y0 = sh.scrollTop <= 0 && e.touches[0].clientY - sh.getBoundingClientRect().top < 60 ? e.touches[0].clientY : null; }, { passive: true });
+  sh.addEventListener('touchend', (e) => { if (y0 != null && e.changedTouches[0].clientY - y0 > 80) closeSheet(); y0 = null; });
+})();
 
 /* ========== 路由 ========== */
 function switchTab(tab) {
