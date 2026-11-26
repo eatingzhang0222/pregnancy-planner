@@ -1,0 +1,2 @@
+{ "name": "孕晚期手帐", "short_name": "孕晚期", "start_url": "./", "display": "standalone",
+  "background_color": "#FBF6F1", "theme_color": "#FBF6F1", "icons": [{ "src": "icon.png", "sizes": "180x180", "type": "image/png" }] }
