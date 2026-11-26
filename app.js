@@ -19,7 +19,7 @@ const NK = NUTRIENTS.map((n) => n.k);
 
 /* ========== 存储 ========== */
 const KEY = 'pp_v1';
-const APP_VERSION = '2026.11.26-6';
+const APP_VERSION = '2026.11.26-7';
 function defaultState() {
   return {
     settings: {
@@ -87,6 +87,8 @@ function gaInfo(date) {
   return { w: Math.floor(passed / 7), d: ((passed % 7) + 7) % 7, left, passed };
 }
 function renderTop() {
+  $('#top').hidden = ui.tab !== 'today';
+  if (ui.tab !== 'today') { $('#top').innerHTML = ''; return; }
   const g = gaInfo(ui.date);
   const isToday = ui.date === today();
   if (!g) {
@@ -184,7 +186,7 @@ function renderWeek() {
         <span>${hm(x.start)}</span>${esc(x.title)}</div>`).join('') || '<span class="muted">—</span>'}</div></div>`;
   }).join('');
   $('#view').innerHTML = viewSeg() + rangeNav(`${a.getMonth() + 1}/${a.getDate()} – ${b.getMonth() + 1}/${b.getDate()}`, `${g ? `${g.w}+${g.d} – ${g2.w}+${g2.d} · ` : ''}${weekStart(today()) === ws ? '本周' : '点此回到本周'}`)
-    + `<div class="card" style="padding:4px 12px">${rows}</div><p class="muted" style="text-align:center">点某一天进入日视图，点事项直接编辑</p>`;
+    + `<div class="card" style="padding:4px 12px">${rows}</div><p class="muted" style="text-align:center">点某一天进入日视图，点事项编辑，长按事项可拖到别的日子</p>`;
 }
 // 有预产期时：只看「本周一（或最早一条日程所在周）→ 预产期」这一段
 function renderCountdownCal() {
@@ -213,6 +215,60 @@ function renderCountdownCal() {
     + `<div class="month"><div class="mh">${['一', '二', '三', '四', '五', '六', '日'].map((w) => `<span>${w}</span>`).join('')}</div>
       <div class="mg">${cells.join('')}</div></div>
       <div class="legend">${S.types.map((t) => `<span><i style="background:${t.color}"></i>${esc(t.name)}</span>`).join('')}</div>`;
+}
+// 周视图：长按事项后拖到另一天（保持原时间）
+function bindWeekDrag() {
+  const v = $('#view');
+  let st = null;
+  const blockScroll = (e) => { if (st && st.on) e.preventDefault(); };
+  document.addEventListener('touchmove', blockScroll, { passive: false });
+  const rowAt = (x, y) => document.elementFromPoint(x, y)?.closest('.week-row');
+  const end = () => {
+    if (!st) return;
+    clearTimeout(st.timer);
+    if (st.on) {
+      st.ghost.remove(); st.el.classList.remove('lifting');
+      v.querySelectorAll('.week-row.drop').forEach((r) => r.classList.remove('drop'));
+      const row = st.target;
+      dragGuardUntil = Date.now() + 400;
+      if (row && row.dataset.date !== st.from) {
+        const f = findAct(st.el.dataset.id);
+        if (f) {
+          S.acts = { ...S.acts, [f.date]: dayActs(f.date).filter((x) => x.id !== f.a.id), [row.dataset.date]: [...dayActs(row.dataset.date), f.a] };
+          save(); toast(`已挪到 ${row.dataset.date.slice(5)}`); st = null; render(); return;
+        }
+      }
+    }
+    st = null;
+  };
+  v.addEventListener('pointerdown', (e) => {
+    const el = e.target.closest('.pill'); if (!el) return;
+    const from = el.closest('.week-row').dataset.date;
+    st = { el, from, x0: e.clientX, y0: e.clientY, on: false, target: null };
+    st.timer = setTimeout(() => {
+      if (!st) return;
+      st.on = true;
+      const r = el.getBoundingClientRect();
+      st.ghost = el.cloneNode(true); st.ghost.classList.add('ghost');
+      Object.assign(st.ghost.style, { width: `${r.width}px`, left: `${r.left}px`, top: `${r.top}px` });
+      st.dx = st.x0 - r.left; st.dy = st.y0 - r.top;
+      document.body.appendChild(st.ghost); el.classList.add('lifting');
+      if (navigator.vibrate) navigator.vibrate(15);
+    }, 280);
+  });
+  v.addEventListener('pointermove', (e) => {
+    if (!st) return;
+    if (!st.on) { if (Math.hypot(e.clientX - st.x0, e.clientY - st.y0) > 8) { clearTimeout(st.timer); st = null; } return; }
+    st.ghost.style.left = `${e.clientX - st.dx}px`; st.ghost.style.top = `${e.clientY - st.dy}px`;
+    const row = rowAt(e.clientX, e.clientY);
+    if (row !== st.target) { st.target?.classList.remove('drop'); row?.classList.add('drop'); st.target = row; }
+  });
+  v.addEventListener('pointerup', end);
+  v.addEventListener('pointercancel', end);
+  v.addEventListener('contextmenu', (e) => { if (e.target.closest('.pill')) e.preventDefault(); });
+  // 重新绑定时卸掉上一次的全局监听
+  const off = () => { document.removeEventListener('touchmove', blockScroll); };
+  bindWeekDrag.off?.(); bindWeekDrag.off = off;
 }
 function renderMonth() {
   if (S.settings.due) return renderCountdownCal();
@@ -253,10 +309,10 @@ function renderPlan() {
   const nowLine = ui.date === today() && nm >= DAY_S ? `<div class="now-line" style="top:${(nm - DAY_S) * PX}px"></div>` : '';
   const evs = acts.map((a) => {
     const t = typeOf(a.type);
-    return `<div class="ev ${a.done ? 'done' : ''}" data-id="${a.id}" style="background:${t.color};top:${(a.start - DAY_S) * PX}px;height:${Math.max(a.dur * PX, 22)}px;
+    return `<div class="ev ${a.done ? 'done' : ''}" data-act="edit-act" data-id="${a.id}" style="background:${t.color};top:${(a.start - DAY_S) * PX}px;height:${Math.max(a.dur * PX, 22)}px;
       left:calc(48px + (100% - 54px) * ${lane[a.id]} / ${n});width:calc((100% - 54px) / ${n} - 4px)">
       <span class="grip" aria-label="拖动调整时间">⋮⋮</span>
-      <b data-act="edit-act" data-id="${a.id}">${esc(a.title)}</b><small class="tm">${hm(a.start)}–${hm(a.start + a.dur)}</small>
+      <b>${esc(a.title)}</b><small class="tm">${hm(a.start)}–${hm(a.start + a.dur)}</small>
       <span class="rz" aria-label="拖动调整时长"></span></div>`;
   }).join('');
   $('#view').innerHTML = `${viewSeg()}${dateNav()}
@@ -297,6 +353,7 @@ function bindTimelineDrag() {
       window.removeEventListener('pointercancel', up);
       if (ns !== s0 || nd !== d0) {
         justDragged = true; setTimeout(() => { justDragged = false; }, 300);
+        dragGuardUntil = Date.now() + 400;
         updateAct(found.date, found.a.id, { start: ns, dur: nd });
         toast(`已调整为 ${hm(ns)}–${hm(ns + nd)}`);
       }
@@ -307,6 +364,7 @@ function bindTimelineDrag() {
     window.addEventListener('pointercancel', up);
   });
 }
+let dragGuardUntil = 0; // 拖动结束后短时间内忽略点击，避免误开编辑框
 function updateAct(date, id, patch) {
   S.acts = { ...S.acts, [date]: dayActs(date).map((a) => (a.id === id ? { ...a, ...patch } : a)) };
   save();
@@ -663,12 +721,13 @@ function confirmReview() {
 
 /* ========== AI（OpenAI 兼容接口，key 只存在本机） ========== */
 const hasAI = () => !!(S.settings.ai.base && S.settings.ai.key);
-async function callLLM(messages) {
+async function callLLM(messages, opts = {}) {
   const { base, key, model } = S.settings.ai;
+  const body = { model: opts.model || model, messages, ...(opts.noTemp ? {} : { temperature: 0.2 }), ...(opts.extra || {}) };
   const res = await fetch(`${base.replace(/\/+$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model, messages, temperature: 0.2 }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const j = await res.json();
@@ -776,7 +835,10 @@ function renderSettings() {
       <p class="muted" style="margin-top:0">拍照识别和 AI 建议需要一个支持图片的 OpenAI 兼容接口。Key 只保存在这台手机本地。</p>
       <label class="f">接口地址 base_url<input data-ai="base" value="${esc(st.ai.base)}" placeholder="https://api.openai.com/v1"></label>
       <label class="f">API Key<input type="password" data-ai="key" value="${esc(st.ai.key)}" placeholder="sk-..."></label>
-      <label class="f">模型<input data-ai="model" value="${esc(st.ai.model)}" placeholder="gpt-4o-mini"></label>
+      <label class="f">模型（需支持图片）<input data-ai="model" value="${esc(st.ai.model)}" placeholder="gpt-4o-mini"></label>
+      <label class="f">联网时用的模型（可选）<input data-ai="searchModel" value="${esc(st.ai.searchModel || '')}" placeholder="如 openai/gpt-4o-mini:online"></label>
+      <label class="f">联网附加参数 JSON（可选）<input data-ai="searchExtra" value="${esc(st.ai.searchExtra || '')}" placeholder='如 {"web_search_options":{}}'></label>
+      <p class="muted">联网示例：OpenRouter 接口 https://openrouter.ai/api/v1，联网模型填「模型名:online」；OpenAI 接口填 gpt-4o-mini-search-preview，附加参数填 {"web_search_options":{}}</p>
       <button class="btn sm ghost" data-act="test-ai">测试连接</button> <span id="ai-test" class="muted"></span></div>
     <div class="card"><h3>我的食物</h3>
       ${S.myFoods.length ? S.myFoods.map((f, i) => `<div class="list-item"><div class="grow">${esc(f.n)} <span class="muted">${f.v[0]}kcal/100g</span></div>
@@ -853,7 +915,7 @@ const ACTIONS = {
   day: (t) => { const n = Number(t.dataset.n); ui.date = n ? addDays(ui.date, n) : today(); render(); },
   'new-act': () => openActSheet(null),
   'quick-act': (t) => openActSheet(null, { type: t.dataset.type, start: ui.date === today() ? Math.ceil(nowMin() / 30) * 30 : 9 * 60 }),
-  'edit-act': (t) => openActSheet(t.dataset.id),
+  'edit-act': (t) => { if (Date.now() > dragGuardUntil) openActSheet(t.dataset.id); },
   'del-act': (t) => deleteAct(t.dataset.id),
   'pick-type': (t) => {
     document.querySelectorAll('[data-act="pick-type"]').forEach((b) => b.classList.toggle('on', b === t));
@@ -932,6 +994,7 @@ function render() {
   $('#view').replaceWith(fresh);
   ({ today: renderToday, plan: renderPlan, food: renderFood, set: renderSettings })[ui.tab]();
   if (ui.tab === 'plan' && ui.view === 'day') bindTimelineDrag();
+  if (ui.tab === 'plan' && ui.view === 'week') bindWeekDrag();
   if (ui.tab === 'set') bindSettings();
   renderTop();
 }
