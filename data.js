@@ -113,3 +113,10 @@ const MILESTONES = [
   [37, '37 周足月，留意见红、破水、规律宫缩'],
   [40, '到预产期了，按医生安排做好引产/监护准备'],
 ];
+
+// 每日用药默认（可在「今天 → 今日用药 → 管理」里改）；every=2 表示隔天，anchor 是某个要吃的日期
+const DEFAULT_MEDS = [
+  { id: 'multi', name: '多维', slots: [''], every: 2, anchor: '2026-11-27' },
+  { id: 'protein', name: '蛋白质胶囊', slots: ['早', '晚'], every: 1, anchor: '' },
+  { id: 'calcium', name: '钙', slots: [''], every: 1, anchor: '' },
+];

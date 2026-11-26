@@ -19,7 +19,7 @@ const NK = NUTRIENTS.map((n) => n.k);
 
 /* ========== 存储 ========== */
 const KEY = 'pp_v1';
-const APP_VERSION = '2026.11.26-4';
+const APP_VERSION = '2026.11.26-5';
 function defaultState() {
   return {
     settings: {
@@ -34,6 +34,8 @@ function defaultState() {
     acts: {},   // { 'YYYY-MM-DD': [{id,type,title,start,dur,note,done,series}] }
     food: {},   // { 'YYYY-MM-DD': { mealId: [{id,name,g,v}] } }
     myFoods: [],
+    meds: DEFAULT_MEDS.map((m) => ({ ...m, slots: [...m.slots] })),
+    medLog: {}, // { 'YYYY-MM-DD': { 'medId:时段': true } }
   };
 }
 function load() {
@@ -124,6 +126,7 @@ function renderToday() {
       html += `<div class="card"><h3>这几周要留意</h3>${(tips.length ? tips : [next]).map(([w, t]) => `<div class="tip"><b>${w}w</b> ${esc(t)}</div>`).join('')}</div>`;
     }
   }
+  html += medsCard(ui.date);
   html += `<div class="card"><h3>今日安排 <button class="btn sm ghost" data-act="new-act">+ 添加</button></h3>
     ${acts.length ? acts.map((a) => {
       const t = typeOf(a.type);
@@ -838,6 +841,7 @@ function importData(file) {
 
 /* ========== 动作分发 ========== */
 const ACTIONS = {
+  ...MED_ACTIONS,
   tab: (t) => switchTab(t.dataset.tab),
   'close-sheet': closeSheet,
   view: (t) => { ui.view = t.dataset.v; render(); },
