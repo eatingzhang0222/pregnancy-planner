@@ -1,6 +1,6 @@
 // 离线缓存：网络优先，失败时用缓存
-const C = 'pp-v1';
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'data.js', 'manifest.webmanifest', 'icon.png'];
+const C = 'pp-v2';
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'chat.js', 'data.js', 'manifest.webmanifest', 'icon.png'];
 self.addEventListener('install', (e) => e.waitUntil(caches.open(C).then((c) => c.addAll(FILES))));
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || !e.request.url.startsWith(self.location.origin)) return;

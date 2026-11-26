@@ -136,6 +136,14 @@ textarea { resize: vertical; min-height: 70px; }
 .tabs button span { font-size: 20px; line-height: 1; }
 .tabs button.on { color: var(--rose); font-weight: 600; }
 
+/* 记一笔 */
+.fab { position: fixed; right: 18px; bottom: calc(var(--tab-h) + var(--safe-b) + 16px); width: 54px; height: 54px; border-radius: 50%;
+  background: var(--rose); color: #fff; font-size: 22px; z-index: 21; box-shadow: 0 10px 24px -8px rgba(217,119,106,.7); transition: transform .12s; }
+.fab:active { transform: scale(.92); }
+.ask { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 14px 16px; border-radius: var(--r);
+  background: var(--card); border: 1.5px dashed var(--rose); color: var(--mute); margin-bottom: 12px; }
+.ask b { color: var(--rose); font-size: 18px; }
+
 /* 底部弹层 */
 .sheet-mask { position: fixed; inset: 0; background: rgba(30,20,15,.35); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; }
 .sheet-mask.on { opacity: 1; pointer-events: auto; }

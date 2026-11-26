@@ -123,6 +123,7 @@ function renderToday() {
       html += `<div class="card"><h3>这几周要留意</h3>${(tips.length ? tips : [next]).map(([w, t]) => `<div class="tip"><b>${w}w</b> ${esc(t)}</div>`).join('')}</div>`;
     }
   }
+  html = `<button class="ask" data-act="open-chat"><b>✎</b>记一笔：吃了什么、约了什么、做完了什么…</button>` + html;
   html += `<div class="card"><h3>今日安排 <button class="btn sm ghost" data-act="new-act">+ 添加</button></h3>
     ${acts.length ? acts.map((a) => {
       const t = typeOf(a.type);
@@ -498,25 +499,25 @@ function findFood(name) {
   return best;
 }
 // 每"1 个单位"的克数：份量名里自带数量（如"3勺"30g、"半个"70g）时折算回单个
-function unitGrams(food) {
-  const u = food.u?.[0]; if (!u) return 100;
+function unitGrams(food, measure) {
+  const u = (measure && food.u?.find(([n]) => n.includes(measure))) || food.u?.[0]; if (!u) return 100;
   const m = u[0].match(/^(\d+(?:\.\d+)?|[一两二三四五六半])/);
   const n = m ? (CN_NUM[m[1]] ?? Number(m[1])) : 1;
   return u[1] / (n || 1);
 }
 function parsePiece(raw) {
   let s = raw.trim(); if (!s) return null;
-  let g = null, count = null;
+  let g = null, count = null, measure = null;
   const mg = s.match(/(\d+(?:\.\d+)?)\s*(g|克|ml|毫升)/i);
   if (mg) { g = Number(mg[1]); s = s.replace(mg[0], ''); }
   else {
     const mc = s.match(/(\d+(?:\.\d+)?|[一两二三四五六半])\s*(个|碗|杯|片|根|盒|份|块|勺|颗|把|小把)/);
-    if (mc) { count = CN_NUM[mc[1]] ?? Number(mc[1]); s = s.replace(mc[0], ''); }
+    if (mc) { count = CN_NUM[mc[1]] ?? Number(mc[1]); measure = mc[2]; s = s.replace(mc[0], ''); }
   }
   const name = s.replace(/[\s。.]/g, '');
   const food = findFood(name);
   if (!food) return { id: uid(), name: name || raw, g: g || 100, v: null, raw };
-  if (g == null) g = Math.round(unitGrams(food) * (count ?? 1));
+  if (g == null) g = Math.round(unitGrams(food, measure) * (count ?? 1));
   return { id: uid(), name: food.n, g, v: food.v };
 }
 function openTextFood() {
