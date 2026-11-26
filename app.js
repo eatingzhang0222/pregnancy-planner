@@ -435,7 +435,71 @@ function deleteAct(id) {
 }
 
 /* ========== 营养计算 ========== */
-const allFoods = () => [...S.myFoods, ...FOODS];
+// 食物来源优先级：我的食物 > 常用食物 > 家常菜 > 中国食物成分表
+const DB_FOODS = (typeof FOODS_DB_RAW === 'undefined' ? [] : FOODS_DB_RAW)
+  .filter((r) => !FOODS.some((f) => f.n === r[0]))
+  .map(([n, cat, ...x]) => ({ n, cat, v: x.slice(0, 7), a: x[7] ? x[7].split('、') : undefined, db: true, rep: !!x[8] }));
+const normName = (n) => String(n).replace(/\(/g, '（').replace(/\)/g, '）').trim();
+const baseName = (n) => normName(n).replace(/（[^）]*）/g, '').trim();
+const keysOf = (f) => [baseName(f.n), ...(f.a || [])].filter(Boolean);
+function fuzzyFind(list, name) {
+  const q = baseName(name); if (!q) return null;
+  const same = list.filter((f) => baseName(f.n) === q);
+  if (same.length) return same.find((f) => f.rep) || same[0];
+  let best = null, len = 0;
+  list.forEach((f) => keysOf(f).forEach((k) => { if (k.length > len && q.includes(k)) { best = f; len = k.length; } }));
+  if (best || q.length < 2) return best;
+  len = Infinity;
+  list.forEach((f) => keysOf(f).forEach((k) => { if (k.length < len && k.includes(q)) { best = f; len = k.length; } }));
+  return best;
+}
+const exactFind = (list, name) => { const q = normName(name); return list.find((f) => normName(f.n) === q || (f.a || []).includes(name)); };
+// 家常菜：按配方把食材营养加权成每 100g
+let dishCache = null;
+function dishFoods() {
+  if (dishCache) return dishCache;
+  const pool = [...FOODS, ...DB_FOODS];
+  dishCache = (typeof DISHES === 'undefined' ? [] : DISHES).map((d) => {
+    let w = 0; const sum = NK.map(() => 0); const miss = [];
+    d.r.forEach(([n, g]) => {
+      w += g;
+      if (n === '水') return;
+      const f = exactFind(pool, n) || fuzzyFind(pool, n);
+      if (!f) { miss.push(n); return; }
+      f.v.forEach((x, i) => { sum[i] += (x * g) / 100; });
+    });
+    return { n: d.n, cat: '家常菜', dish: true, a: d.a, recipe: d.r, miss,
+      v: sum.map((x) => round((x / w) * 100, 1)), u: [['一份', d.s || Math.round(w / 2)]] };
+  });
+  return dishCache;
+}
+const coreFoods = () => [...S.myFoods, ...FOODS, ...dishFoods()];
+const allFoods = () => [...coreFoods(), ...DB_FOODS];
+// 血糖生成指数
+function findGI(name) {
+  if (typeof GI_DB === 'undefined' || !name) return null;
+  const b = baseName(name);
+  const hit = GI_DB.find(([n]) => n === name || baseName(n) === b);
+  if (hit) return hit[1];
+  let best = null, len = 1;
+  GI_DB.forEach(([n, gi]) => { const k = baseName(n); if (k.length > len && (b.includes(k) || k.includes(b))) { best = gi; len = k.length; } });
+  return best;
+}
+function giTag(name) {
+  const gi = findGI(name); if (gi == null) return '';
+  const [lv, c] = gi >= 70 ? ['高', 'var(--rose)'] : gi >= 56 ? ['中', 'var(--amber)'] : ['低', 'var(--sage)'];
+  return `<span style="color:${c}">GI ${gi}${lv}</span>`;
+}
+// 同名食物合并克数
+function mergeItems(items) {
+  const out = [];
+  items.forEach((it) => {
+    const j = it.v ? out.findIndex((x) => x.v && x.name === it.name) : -1;
+    if (j < 0) out.push({ ...it });
+    else out[j] = { ...out[j], g: out[j].g + it.g, unsure: out[j].unsure || it.unsure, seen: out[j].seen || it.seen };
+  });
+  return out;
+}
 const mealsOf = (date) => S.food[date] || {};
 function itemNut(it) {
   return Object.fromEntries(NK.map((k, i) => [k, ((it.v?.[i] || 0) * it.g) / 100]));
@@ -447,7 +511,12 @@ function sumItems(items) {
 }
 const notesList = () => String(S.settings.notes || '').split('\n').map((x) => x.trim()).filter(Boolean);
 const catGrams = (date, cat) => Object.values(mealsOf(date)).flat()
-  .reduce((s, it) => s + (allFoods().find((f) => f.n === it.name)?.cat === cat ? it.g : 0), 0);
+  .reduce((s, it) => {
+    const f = allFoods().find((x) => x.n === it.name);
+    if (!f?.dish) return s + (f?.cat === cat ? it.g : 0);
+    const w = f.recipe.reduce((t, [, g]) => t + g, 0);
+    return s + f.recipe.reduce((t, [n, g]) => t + (findFood(n)?.cat === cat ? (it.g * g) / w : 0), 0);
+  }, 0);
 const dayTotals = (date) => sumItems(Object.values(mealsOf(date)).flat());
 function setMealItems(date, mealId, items) {
   S.food = { ...S.food, [date]: { ...mealsOf(date), [mealId]: items } };
@@ -574,19 +643,26 @@ function openFoodPicker() {
   renderFoodList();
 }
 function renderFoodList() {
-  const cats = ['全部', '我的', ...new Set(FOODS.map((f) => f.cat))];
+  const cats = ['全部', '我的', '家常菜', ...new Set(FOODS.map((f) => f.cat))];
   $('#food-cats').innerHTML = cats.map((c) => `<button class="chip ${ui.cat === c ? 'on' : ''}" data-act="food-cat" data-cat="${c}">${c}</button>`).join('');
-  const list = allFoods().filter((f) => (ui.cat === '全部' || (ui.cat === '我的' ? f.mine : f.cat === ui.cat))
-    && (!ui.q || f.n.includes(ui.q) || (f.a || []).some((a) => a.includes(ui.q))));
-  $('#food-list').innerHTML = list.map((f) => `<div class="food-row" data-act="pick-one" data-name="${esc(f.n)}"><div class="grow">${esc(f.n)}
-      <div class="k">每100g ${f.v[0]}kcal · 蛋白 ${f.v[1]}g${f.u ? ` · ${f.u[0][0]}≈${f.u[0][1]}g` : ''}</div></div><span class="muted">›</span></div>`).join('')
-    || '<div class="empty">没找到，可以新建自定义食物</div>';
+  const inCat = (f) => ui.cat === '全部' || (ui.cat === '我的' ? f.mine : f.cat === ui.cat);
+  const hit = (f) => !ui.q || f.n.includes(ui.q) || (f.a || []).some((a) => a.includes(ui.q));
+  // 不搜索时只列常用食物和家常菜；搜索或选了分类时再带上食物成分表
+  const pool = ui.q || !['全部', '我的', '家常菜'].includes(ui.cat) ? allFoods() : coreFoods();
+  const list = pool.filter((f) => inCat(f) && hit(f)).slice(0, 80);
+  $('#food-list').innerHTML = list.map((f) => {
+    const gi = giTag(f.n);
+    return `<div class="food-row" data-act="pick-one" data-name="${esc(f.n)}"><div class="grow">${esc(f.n)}${f.db ? ' <span class="muted" style="font-size:11px">成分表</span>' : ''}
+      <div class="k">每100g ${f.v[0]}kcal · 蛋白 ${f.v[1]}g${f.u ? ` · ${f.u[0][0]}≈${f.u[0][1]}g` : ''}${gi ? ` · ${gi}` : ''}</div></div><span class="muted">›</span></div>`;
+  }).join('') || '<div class="empty">没找到，可以新建自定义食物</div>';
 }
 function openGramSheet(food, item) {
   const g0 = item ? item.g : (food.u?.[0]?.[1] || 100);
   openSheet(`<h2>${esc(food.n || food.name)}</h2>
     <div>${(food.u || []).map(([n, g]) => `<button class="chip" data-act="set-g" data-g="${g}">${n} ${g}g</button>`).join('')}
       ${[50, 100, 150, 200].map((g) => `<button class="chip" data-act="set-g" data-g="${g}">${g}g</button>`).join('')}</div>
+    ${food.recipe ? `<p class="muted" style="margin:8px 0 0">参考做法（整盘生重）：${food.recipe.map(([n, g]) => `${esc(n)} ${g}g`).join(' + ')}</p>` : ''}
+    ${giTag(food.n || food.name) ? `<p class="muted" style="margin:6px 0 0">血糖生成指数 ${giTag(food.n || food.name)}</p>` : ''}
     <label class="f">实际食用克数<input type="number" inputmode="decimal" id="gram-in" value="${g0}" min="1"></label>
     <div id="gram-calc" class="plan-box"></div>
     <div class="actions">${item ? `<button class="btn ghost" data-act="del-item" data-id="${item.id}">删除</button>` : ''}
@@ -604,7 +680,8 @@ function saveGram() {
   const g = Number($('#gram-in').value);
   if (!(g > 0)) return toast('请输入克数');
   const items = mealsOf(ui.date)[ui.meal] || [];
-  const next = item ? items.map((x) => (x.id === item.id ? { ...x, g } : x)) : [...items, { id: uid(), name: food.n, g, v: food.v }];
+  const next = item ? items.map((x) => (x.id === item.id ? { ...x, g } : x))
+    : mergeItems([...items, { id: uid(), name: food.n, g, v: food.v }]);
   setMealItems(ui.date, ui.meal, next); closeSheet(); render(); toast(item ? '已更新' : '已加入');
 }
 function openNewFood() {
@@ -628,14 +705,8 @@ function openNewFood() {
 const CN_NUM = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 半: 0.5 };
 function findFood(name) {
   if (!name) return null;
-  const foods = allFoods();
-  const exact = foods.find((f) => f.n === name || (f.a || []).includes(name));
-  if (exact) return exact;
-  let best = null, bestLen = 0;
-  foods.forEach((f) => [f.n.replace(/\(.*\)/, ''), ...(f.a || [])].forEach((k) => {
-    if (k.length > bestLen && (name.includes(k) || k.includes(name))) { best = f; bestLen = k.length; }
-  }));
-  return best;
+  const core = coreFoods();
+  return exactFind(core, name) || exactFind(DB_FOODS, name) || fuzzyFind(core, name) || fuzzyFind(DB_FOODS, name);
 }
 // 每"1 个单位"的克数：份量名里自带数量（如"3勺"30g、"半个"70g）时折算回单个
 function unitGrams(food, measure) {
@@ -680,7 +751,7 @@ async function parseText() {
       toast(`AI 失败：${e.message}`); items = [...items, ...unmatched];
     }
   } else items = [...items, ...unmatched];
-  openReview(items, text);
+  openReview(mergeItems(items), text);
 }
 
 /* 识别结果确认 */
@@ -688,7 +759,7 @@ function openReview(items, source) {
   ui.review = items; ui.reviewSrc = source;
   const rows = items.map((it) => {
     const k = it.v ? Math.round((it.v[0] * it.g) / 100) : '?';
-    const hint = [it.unsure ? '<span style="color:var(--amber)">⚠ 拿不准，请核对</span>' : '', it.seen ? `看到：${esc(it.seen)}` : '',
+    const hint = [it.unsure ? '<span style="color:var(--amber)">⚠ 拿不准，请核对</span>' : '', it.seen ? `看到：${esc(it.seen)}` : '', giTag(it.name),
       it.v ? '' : '<span style="color:var(--rose)">未匹配，改成库内名称或用「选食物」</span>'].filter(Boolean).join(' · ');
     return `<div class="food-row"><div class="grow"><input class="inp" style="margin:0;padding:6px 8px;font-size:15px" value="${esc(it.name)}" data-rname="${it.id}">
       ${hint ? `<div class="k" style="margin-top:2px">${hint}</div>` : ''}</div>
@@ -706,7 +777,7 @@ function openReview(items, source) {
       const food = findFood(inp.value.trim());
       ui.review = ui.review.map((x) => (x.id === inp.dataset.rname
         ? { ...x, name: food ? food.n : inp.value.trim(), v: food ? food.v : x.v, unsure: false } : x));
-      openReview(ui.review, source);
+      openReview(mergeItems(ui.review), source);
       if (!food) toast('食物库里没找到这个名称，营养沿用 AI 估算');
     };
   });
@@ -717,8 +788,11 @@ function openReview(items, source) {
 function confirmReview() {
   const ok = (ui.review || []).filter((x) => x.v && x.g > 0).map(({ id, name, g, v }) => ({ id, name, g, v }));
   if (!ok.length) return toast('没有可加入的项');
-  setMealItems(ui.date, ui.meal, [...(mealsOf(ui.date)[ui.meal] || []), ...ok]);
-  closeSheet(); render(); toast(`已加入 ${ok.length} 项`);
+  const before = mealsOf(ui.date)[ui.meal] || [];
+  const merged = mergeItems([...before, ...ok]).map(({ id, name, g, v }) => ({ id, name, g, v }));
+  const combined = before.length + ok.length - merged.length;
+  setMealItems(ui.date, ui.meal, merged);
+  closeSheet(); render(); toast(`已加入 ${ok.length} 项${combined ? `（${combined} 项与已有同名食物合并了克数）` : ''}`);
 }
 
 /* ========== AI（OpenAI 兼容接口，key 只存在本机） ========== */
@@ -744,7 +818,7 @@ const RECOG_PROMPT = '你是注册营养师，擅长从照片识别中式家常�
   + '"per100":[热量kcal,蛋白质g,脂肪g,碳水g,钙mg,铁mg,膳食纤维g]}。看不清或拿不准时 sure 写 false。';
 function recogContext() {
   const meal = S.settings.meals.find((m) => m.id === ui.meal);
-  const names = allFoods().map((f) => f.n).join('、');
+  const names = coreFoods().map((f) => f.n).join('、');
   return `${meal ? `这一餐是「${meal.name}」，计划：\n${meal.plan}\n` : ''}常用食物清单：${names}`;
 }
 async function aiRecognize({ text, image }) {
@@ -757,14 +831,14 @@ async function aiRecognize({ text, image }) {
   if (!m) throw new Error('没解析到结果');
   const arr = JSON.parse(m[0]);
   if (!Array.isArray(arr)) throw new Error('格式不对');
-  return arr.filter((x) => x && x.name).map((x) => {
+  return mergeItems(arr.filter((x) => x && x.name).map((x) => {
     const name = String(x.name).slice(0, 30);
     const food = findFood(name);
     // 库里有的食物用库内营养数据，模型只负责认菜和估克数
     const v = food ? food.v : Array.isArray(x.per100) ? NK.map((_, i) => Math.max(0, Number(x.per100[i]) || 0)) : null;
     return { id: uid(), name: food ? food.n : name, g: Math.max(1, Math.round(Number(x.grams) || 100)), v,
       seen: String(x.seen || '').slice(0, 30), unsure: x.sure === false };
-  });
+  }));
 }
 function compressImage(file, max = 1536) {
   return new Promise((resolve, reject) => {
