@@ -19,7 +19,7 @@ const NK = NUTRIENTS.map((n) => n.k);
 
 /* ========== 存储 ========== */
 const KEY = 'pp_v1';
-const APP_VERSION = '2026.11.26-11';
+const APP_VERSION = '2026.11.27-12';
 function defaultState() {
   return {
     settings: {
@@ -461,7 +461,7 @@ function deleteAct(id) {
 const DB_FOODS = (typeof FOODS_DB_RAW === 'undefined' ? [] : FOODS_DB_RAW)
   .filter((r) => !FOODS.some((f) => f.n === r[0]))
   .map(([n, cat, ...x]) => ({ n, cat, v: x.slice(0, 7), a: x[7] ? x[7].split('、') : undefined, db: true, rep: !!x[8] }));
-const normName = (n) => String(n).replace(/\(/g, '（').replace(/\)/g, '）').trim();
+const normName = (n) => String(n).replace(/\(/g, '（').replace(/\)/g, '）').replace(/\s+/g, '');
 const baseName = (n) => normName(n).replace(/（[^）]*）/g, '').trim();
 const keysOf = (f) => [baseName(f.n), ...(f.a || [])].filter(Boolean);
 function fuzzyFind(list, name) {
@@ -774,7 +774,8 @@ const CN_NUM = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 半: 0.
 function findFood(name) {
   if (!name) return null;
   const core = coreFoods();
-  return exactFind(core, name) || exactFind(DB_FOODS, name) || fuzzyFind(core, name) || fuzzyFind(DB_FOODS, name);
+  // 自定义食物优先：说"燕麦杯"也能命中「XX牌燕麦杯」
+  return exactFind(core, name) || exactFind(DB_FOODS, name) || fuzzyFind(S.myFoods, name) || fuzzyFind(core, name) || fuzzyFind(DB_FOODS, name);
 }
 // 每"1 个单位"的克数：份量名里自带数量（如"3勺"30g、"半个"70g）时折算回单个
 function unitGrams(food, measure) {

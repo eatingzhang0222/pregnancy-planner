@@ -89,11 +89,16 @@ function localFood(clause) {
     .replace(new RegExp(S.settings.meals.map((m) => m.name).join('|'), 'g'), '')
     .replace(/早餐|早饭|午餐|午饭|晚餐|晚饭|中午|晚上|早上|上午|下午|加餐|下午茶|睡前|宵夜|夜宵|点心\d?/g, '')
     .replace(/吃了|喝了|吃的|喝的|吃|喝|了|有|还/g, ' ');
-  const items = body.split(/[,，、;；+＋\s]|和|跟|加/).map((x) => x.trim()).filter(Boolean).map(parsePiece).filter(Boolean);
+  // 先把自定义食物名整体保护起来，避免名字里的空格/和/加被拆开
+  const mine = [...S.myFoods].sort((a, b) => b.n.length - a.n.length);
+  const safe = mine.reduce((t, f, i) => t.split(f.n).join(`\u0001${i}\u0002`), body);
+  const items = safe.split(/[,，、;；+＋\s]|和|跟|加/).map((x) => x.replace(/\u0001(\d+)\u0002/g, (_, i) => mine[i].n).trim())
+    .filter(Boolean).map(parsePiece).filter(Boolean);
   return { kind: 'food', on: true, date: parseDateText(clause), meal: guessMealId(clause), items };
 }
 function isFoodClause(c) {
   if (/吃|喝|餐|饭|点心|加餐|宵夜|\d+\s*(g|克|ml|毫升)/i.test(c)) return true;
+  if (S.myFoods.some((f) => c.includes(f.n))) return true;
   return c.split(/[,，、\s]/).some((p) => findFood(p.replace(/\d.*$/, '')));
 }
 function localMed(clause) {
@@ -136,7 +141,8 @@ function normalizeActions(arr, text) {
       const meal = S.settings.meals.some((x) => x.id === a.meal) ? a.meal : guessMealId(text);
       const items = (a.items || []).filter((x) => x && x.name).map((x) => {
         const name = String(x.name).slice(0, 30);
-        const local = allFoods().find((f) => f.n === name || (f.a || []).includes(name)); // 库里有就用库里的数，保持一致
+        // 库里有就用库里的数，保持一致；AI 说的名字和自定义食物不完全一样也尽量对上
+        const local = exactFind(allFoods(), name) || fuzzyFind(S.myFoods, name);
         const v = local ? local.v : (Array.isArray(x.per100) ? NK.map((_, i) => Math.max(0, Number(x.per100[i]) || 0)) : null);
         return { id: uid(), name: local ? local.n : name, g: Math.max(1, Math.round(Number(x.grams) || 100)), v };
       });
@@ -188,6 +194,7 @@ function chatContext() {
     + `\n药物：${(S.meds || []).map((x) => `${x.id}=${x.name}[时段:${x.slots.join('/') || '无'}${medDue(x, d) ? '' : '，今天不用吃'}；今天已吃:${x.slots.filter((s) => log[medKey(x, s)]).join('/') || '无'}]`).join('；')}`
     + `\n今日已吃：${S.settings.meals.map((x) => `${x.name}:${(m[x.id] || []).map((i) => `${i.name}${i.g}g`).join('、') || '无'}`).join('；')}`
     + `\n今日摄入/目标：${NUTRIENTS.map((n) => `${n.label}${round(tot[n.k])}/${T[n.k]}${n.unit}`).join('，')}`
+    + (S.myFoods.length ? `\n我的自定义食物（提到时 name 必须原样用这里的名字，克数按"一份"折算）：${S.myFoods.map((f) => `${f.n}(一份${f.u?.[0]?.[1] || 100}g)`).join('、')}` : '')
     + `\n未来 7 天日程：${upcoming.join('；') || '无'}`
     + (notesList().length ? `\n医嘱要点：${notesList().join('；')}` : '');
 }
